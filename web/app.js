@@ -128,14 +128,16 @@ function updateUI(){
     if(history.length>150)history.shift();lastUpdate=m.update;
   }
   if(state.history?.length)history=state.history.map(e=>({value:e.lap_success_pct,update:e.update}));
-  const signature=state.checkpoints.map(c=>c.key).join('|');
+  const selectable=state.checkpoints.filter(c=>c.key.startsWith(m.run+'/')&&(c.key.includes('/best')||c.key.includes('/lesson-')));
+  const signature=selectable.map(c=>`${c.key}:${c.update}:${c.evaluation?.lap_success_pct}`).join('|');
   if(signature!==checkpointSignature){
     checkpointSignature=signature;
-    const select=$('driver');select.innerHTML='<option value="latest">Latest learner</option><option value="rookie">Day one · total mayhem</option>';
-    const checkpoints=state.checkpoints.filter(c=>c.key.startsWith(m.run+'/')&&(c.key.includes('/best')||c.key.includes('/lesson-')));
+    const select=$('driver'), selectedValue=select.value;select.innerHTML='<option value="latest">Latest learner</option><option value="rookie">Day one · total mayhem</option>';
+    const checkpoints=selectable;
     for(const cp of checkpoints){
       const option=document.createElement('option');option.value=cp.key;option.textContent=`${cp.key.split('/')[1]} · ${cp.evaluation?.lap_success_pct ?? '—'}%${cp.obstacles?' · barriers':''}`;select.append(option);
     }
+    if([...select.options].some(option=>option.value===selectedValue))select.value=selectedValue;
   }
   if(document.activeElement!==$('driver'))$('driver').value=state.view.driver;
   $('speed').value=String(state.view.speed);$('heldout').checked=state.view.heldout;$('stochastic').checked=state.view.stochastic;
