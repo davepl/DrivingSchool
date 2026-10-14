@@ -1,0 +1,10 @@
+[project]
+name = "daves-driving-school"
+version = "0.1.0"
+description = "GPU-parallel reinforcement learning driving spectacle for Dave's Garage"
+requires-python = ">=3.11"
+dependencies = ["torch>=2.7", "numpy>=2.0"]
+
+[tool.setuptools]
+packages = ["drivingschool"]
+

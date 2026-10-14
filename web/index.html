@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Dave's Garage · Driving School</title><link rel="stylesheet" href="/style.css"></head>
+<body>
+<header><div class="brand"><span class="logo">DG</span><div><div class="eyebrow">DAVE'S GARAGE / EXPERIMENT 001</div><h1>Driving school<span class="accent">.</span></h1></div></div><div class="connection"><span id="connectionDot"></span><span id="connection">CONNECTING TO DELL</span></div><div class="theater-controls"><button id="pauseTop">Pause learning</button><button id="newClassTop">New class</button></div><button id="fullscreen" class="icon-button" title="Fullscreen">⛶</button></header>
+<main>
+<section class="intro"><div><div class="eyebrow accent">ONE MACHINE. THOUSANDS OF SECOND CHANCES.</div><h2>Crash. Learn. Repeat.</h2><p id="status">Starting the class…</p></div><div class="class-controls"><button id="pause">Pause learning</button><button id="newClass" class="secondary">New class</button></div></section>
+<section class="stats">
+<div class="stat"><span id="populationLabel">CARS LEARNING IN PARALLEL</span><strong id="population">—</strong><small id="device">GB300 · GPU simulation + PPO</small></div>
+<div class="stat"><span id="rateLabel">EXPERIENCES PER SECOND</span><strong id="throughput">—</strong><small id="throughputDetail">Simulation + training; tests excluded</small></div>
+<div class="stat"><span>SIMULATED MILES</span><strong id="miles">—</strong><small id="simHours">Training population, cumulative</small></div>
+<div class="stat"><span>CRASHES THAT TAUGHT SOMETHING</span><strong id="crashes" class="coral">—</strong><small id="laps">— completed training laps</small></div>
+</section>
+<section class="workspace">
+<div class="arena-panel">
+<div class="panel-head"><div><span class="live-tag">LIVE POLICY REPLAY</span><h3 id="trackName">Circuit 01 / The proving ground</h3></div><div class="view-controls"><select id="driver" aria-label="Choose driver"><option value="latest">Latest learner</option><option value="rookie">Day one · total mayhem</option></select><select id="speed" aria-label="Playback speed"><option value="1">1× speed</option><option value="2">2× speed</option><option value="4">4× speed</option></select></div></div>
+<div class="arena-wrap"><canvas id="arena"></canvas><div class="arena-overlay"><span id="lesson">LESSON 01 / STAY ON THE ROAD</span><div id="spectators">Waiting for the first drivers…</div></div><div class="legend"><span><i class="cyan"></i> Learners</span><span><i class="gold"></i> Featured driver</span><span><i class="red"></i> Crash</span></div></div>
+<div class="arena-footer"><label class="toggle"><input type="checkbox" id="heldout"> Unseen test tracks</label><label class="toggle"><input type="checkbox" id="stochastic"> Exploration on</label><span id="replayStats">Independent cars · boundaries and barriers collide</span></div>
+<div id="circuits" class="circuits"></div>
+</div>
+<aside>
+<section class="side-panel progress-panel"><div class="eyebrow">THE REAL TEST</div><h3>Can it finish a new track?</h3><p>Same sensors. Two courses the learner never trains on.</p><div class="comparison"><div><span>DAY ONE</span><strong id="rookieSuccess">—</strong></div><div class="arrow">→</div><div><span>DRIVER ON TRACK</span><strong id="success" class="accent">—</strong></div></div><div class="bar"><div id="successBar"></div></div><small id="evaluationDetail">128 drivers · fixed test seed · a full lap without crashing</small><canvas id="learningChart"></canvas><div class="chart-caption"><span>Class test history</span><span id="update">Lesson 0</span></div><p id="evalLesson" class="note">Tests run periodically; the live replay is a separate sample.</p></section>
+<section class="side-panel"><div class="eyebrow">UNDER THE HOOD</div><h3>NVIDIA GB300</h3><div class="hardware"><div><span>GPU busy</span><strong id="util">—</strong></div><div><span>GPU power</span><strong id="power">—</strong></div><div><span>Training memory</span><strong id="memory">—</strong></div><div><span>GPU temperature</span><strong id="temperature">—</strong></div></div><div class="load-bar"><div id="utilBar"></div></div><p class="note">Utilization and power include other jobs on the GPU. Training memory is this process's peak tensor allocation.</p></section>
+<section class="side-panel how"><div class="eyebrow">WHAT YOU ARE WATCHING</div><p>Real reinforcement learning. No scripted steering, prerecorded laps, or hidden expert driver.</p><p>Each car gets its own world. The overlapping cars are independent experiences, so they collide with the road and barriers, not each other.</p><p>The replay uses the learned policy at human speed. The full population trains on the GPU as fast as it can.</p><div class="session" id="session">DELL / LOCAL / NO CLOUD</div></section>
+</aside></section>
+<footer><span>DAVE'S GARAGE · GPU DRIVING SCHOOL</span><span>2D kinematic vehicle model · PPO · locally trained</span></footer>
+</main><script src="/app.js"></script></body></html>

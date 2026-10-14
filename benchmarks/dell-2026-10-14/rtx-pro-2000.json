@@ -1,0 +1,15 @@
+{
+  "gpu": "NVIDIA RTX PRO 2000 Blackwell",
+  "population": 65536,
+  "width": 512,
+  "horizon": 32,
+  "epochs": 3,
+  "batch": 65536,
+  "precision": "FP32 with high matmul precision (TF32 permitted)",
+  "torch": "2.13.0+cu130",
+  "median_car_steps_per_second": 1177131.3006410943,
+  "median_update_seconds": 1.781578742506099,
+  "measured_updates": 18,
+  "warmup_updates_excluded": 2,
+  "notes": "Includes rollout + PPO optimization. Tests, checkpoint writes and rendering excluded. Other GPU jobs were not stopped."
+}
