@@ -1,9 +1,16 @@
 # Dave's Garage — GPU Driving School
 
-65,536 independent cars learn steering and speed control on the Dell GB300.
+262,144 independent cars learn steering and speed control on the Dell GB300.
 The GPU runs both 2D vehicle simulation and PPO reinforcement learning. A local
 browser dashboard replays 384 drivers at human speed and shows real training
 throughput, crashes, miles, and held-out lap completion.
+
+The installed service now uses **max-load mode**: a 2,048-wide, 4.24-million-
+parameter policy, 32-step rollouts, 131,072-sample minibatches, three PPO epochs,
+and continuous training. A one-minute measurement recorded **100% GB300
+utilization in all 60 samples**, **1,037 W average power**, and a peak of 1,055 W.
+The live viewer's average frame age was 94 ms. Those are measured whole-GPU
+readings with Robotron still running, not a claim about advertised peak FLOPS.
 
 ## Watch on the Dell over RDP
 
@@ -22,8 +29,8 @@ GNOME may require right-clicking the launcher and choosing **Allow Launching**.
 The Dell's existing GNOME RDP service listens on port 3389.
 
 The service is already installed for `dave` and starts automatically. It trains
-for 300 updates, then keeps the live replay available and selects the best saved
-driver. **New class** starts another run. **Pause learning** pauses at an update
+continuously. **New class** starts another run with fresh weights and preserves
+the previous class. **Pause learning** pauses at an update
 boundary while the live replay continues.
 
 ## Start and stop
@@ -38,13 +45,24 @@ journalctl --user -u driving-school -f
 For a manually configured run, first stop the service, then:
 
 ```bash
-./scripts/run.sh --envs 65536 --width 512 --batch 65536 --updates 300
+./scripts/run.sh --max-load
 ```
 
-`--updates 0` trains continuously. `--envs` changes the real GPU population.
+`--max-load` selects the larger continuous profile. Explicit arguments override
+its preset values. `--updates 0` trains continuously. `--envs` changes the real GPU population.
 `--eager` disables compilation for debugging; `--device cpu` supports a small CPU
-run. The scripts choose physical GPU 1, the GB300 on this Dell. Use `DRIVING_GPU=0`
-to select the RTX PRO 2000 instead. CUDA sees the selected device as `cuda:0`.
+run. The scripts choose physical GPU 1, the GB300 on this Dell. CUDA sees the
+selected device as `cuda:0`. Max-load mode runs replay inference and asynchronous
+validation in separate processes exposing physical GPU 0, the RTX PRO 2000.
+This separation avoids the Dell's CUDA initialization failure when both GPU
+types are exposed in one process. `--viewer-device` and `--eval-device` accept
+`external:0` for this arrangement. Replay uses BF16 inference; validation uses
+the FP32 learned policy and the same fixed-seed tests.
+
+For the original lighter profile, run `./scripts/run.sh` without `--max-load`.
+It uses 65,536 cars, a 512-wide policy, and 300 updates, then selects its best
+driver. The smaller profile is useful for quick learning demonstrations;
+the max-load profile is intended to occupy the GB300 continuously.
 
 On another computer, set `DRIVING_UV` and `DRIVING_PYTHON` as needed, then run
 `scripts/setup.sh`. Setup uses NVIDIA's official CUDA 13.0 PyTorch wheel index.
@@ -80,8 +98,9 @@ and credentials are managed by the existing Dell setup.
   their scores are used for curriculum advancement and best-checkpoint selection.
 - Barriers are introduced once road-only validation reaches 80% after at least
   20 updates. Road and barrier checkpoints remain separate.
-- The browser shows a separate CPU simulation of the **actual neural policy**,
-  rather than 65,536 cars rendered in real time. It is labelled as a live policy
+- The browser shows a separate human-speed simulation of the **actual neural policy**,
+  rather than the entire population rendered in real time. Replay physics run
+  on the CPU, and inference runs on the isolated RTX GPU in max-load mode. It is labelled as a live policy
   replay. Cars overlap because their training worlds are independent; they do
   not collide with each other.
 
@@ -89,6 +108,21 @@ This is a lightweight driving game and learning demo. Its huge population makes
 parallel learning visible. It is not a traffic simulator or a physical-car model.
 
 ## Measurements on this Dell
+
+Current max-load measurements are saved in
+`benchmarks/dell-2026-10-14/max-load-2048.json` and its raw `.jsonl` trace.
+Updates 38–58 progressed during the 60-second measurement, including background
+validation. Every utilization sample was 100%; peak temperature was 62°C.
+The larger policy processed about 3 million car-steps per second. That rate
+has more computation per car than the original profile below, so the two rates
+are not a speed comparison of identical workloads. Validation runs on the RTX
+without stopping the GB300's training, and policy copies publish every five updates.
+
+To measure load again while the service is running:
+
+```bash
+python3 scripts/measure-load.py --seconds 60
+```
 
 An identical compiled PPO workload with 65,536 environments, a 512-wide network,
 32-step rollouts, three optimization epochs, and 65,536-sample minibatches gave:
@@ -129,7 +163,8 @@ this process's peak tensor allocation, not the entire GPU's memory use.
 
 `drivingschool/env.py` implements GPU tensor physics and sensors;
 `policy.py` defines the actor and critic; `train.py` implements PPO and testing;
-`live.py` serves the dashboard and runs the human-speed policy replay. The viewer
+`live.py` serves the dashboard and runs the human-speed policy replay;
+`worker.py` isolates RTX replay and validation from the GB300 trainer. The viewer
 uses local Canvas graphics and system fonts, with no cloud APIs or external assets.
 
 ```bash
@@ -138,6 +173,8 @@ PYTHON_GIL=1 .venv/bin/python -m unittest discover -s tests -v
 
 Tests cover finite simulation, reset behavior, barrier collisions, lap completion,
 terminal advantage calculation, real policy optimization, and repeatable validation.
+They also verify that asynchronous checkpoints preserve the exact policy and
+update that were tested, and that inference copies load every model parameter.
 The compiled GPU training path and browser controls are also checked on the Dell.
 
 Each class writes `metrics.jsonl`, `rookie.pt`, `latest.pt`, `best-road.pt`,

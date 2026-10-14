@@ -10,7 +10,7 @@ After=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=$repo
-ExecStart=$repo/scripts/run.sh
+ExecStart=$repo/scripts/run.sh --max-load
 Restart=on-failure
 RestartSec=10
 TimeoutStopSec=30
@@ -22,7 +22,7 @@ cat > "$HOME/Desktop/Driving School.desktop" <<EOF
 Version=1.0
 Type=Application
 Name=Dave's Driving School
-Comment=Watch 65,536 cars learn to drive on the GB300
+Comment=Watch a quarter-million cars learn to drive on the GB300
 Exec=$repo/scripts/watch.sh
 Icon=applications-games
 Terminal=false

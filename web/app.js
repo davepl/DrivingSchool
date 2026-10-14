@@ -92,7 +92,9 @@ function updateUI(){
   const m=state.metrics,f=state.frame,e=f.policy_evaluation||m.evaluation;
   $('status').textContent=m.error?`${m.status}: ${m.error}`:m.status;
   const complete=m.complete||m.status?.startsWith('Class complete');
-  $('connection').textContent=complete?'DELL / CLASS COMPLETE':'DELL / LIVE';
+  $('connection').textContent=complete?'DELL / CLASS COMPLETE':m.max_load?'DELL / MAX LOAD':'DELL / LIVE';
+  $('loadBadge').hidden=!m.max_load;
+  $('introTag').textContent=m.max_load?'FULL THROTTLE / CONTINUOUS LEARNING':'ONE MACHINE. THOUSANDS OF SECOND CHANCES.';
   $('populationLabel').textContent=complete?'CARS TRAINED IN PARALLEL':'CARS LEARNING IN PARALLEL';
   $('rateLabel').textContent=complete?'LAST TRAINING RATE / SECOND':'EXPERIENCES PER SECOND';
   $('population').textContent=number(m.envs);$('throughput').textContent=number(m.steps_per_second);
@@ -110,7 +112,7 @@ function updateUI(){
   $('success').textContent=e?`${e.lap_success_pct}%`:'—';$('successBar').style.width=`${e?.lap_success_pct||0}%`;
   $('update').textContent=`Update ${number(m.update||0)}`;
   $('evaluationDetail').textContent=e?`${e.cars} drivers · fixed seed ${e.seed} · a full lap without crashing`:'Waiting for the first test';
-  $('evalLesson').textContent=e?`Driver update ${f.policy_update??m.update??0}: ${e.obstacles?'road + barriers':'road only'} · average ${e.mean_distance_m} m before completion or failure.`:'Tests run periodically; the live replay is a separate sample.';
+  $('evalLesson').textContent=e?`Tested at update ${e.policy_update??f.policy_update??m.update??0}: ${e.obstacles?'road + barriers':'road only'} · average ${e.mean_distance_m} m before completion or failure.`:'Tests run periodically; the live replay is a separate sample.';
   $('lesson').textContent=f.obstacles?'LESSON 02 / AVOID THE BARRIERS':'LESSON 01 / STAY ON THE ROAD';
   $('spectators').textContent=f.count?`${f.count} live policy replays · ${number(m.envs)} GPU training worlds`:'Waiting for the first drivers…';
   $('replayStats').textContent=f.count?`Replay: ${number(f.crashes)} crashes / ${number(f.laps)} laps`:'Independent driving worlds';
@@ -118,6 +120,7 @@ function updateUI(){
   $('util').textContent=gpu?`${gpu.utilization}%`:'—';$('utilBar').style.width=`${gpu?.utilization||0}%`;
   $('power').textContent=gpu?`${number(gpu.watts)} W`:'—';$('temperature').textContent=gpu?`${gpu.temperature} °C`:'—';
   $('memory').textContent=Number.isFinite(m.gpu_memory_gb)?`${number(m.gpu_memory_gb,2)} GB`:'—';
+  $('loadProfile').textContent=m.max_load?`Continuous training · ${number(m.policy_parameters/1e6,1)}M-parameter driver`:'';
   $('session').textContent=`DELL / ${m.run || 'LOCAL'} / NO CLOUD`;
   if(m.update!==lastUpdate){
     if(m.update<lastUpdate)history=[];

@@ -3,7 +3,10 @@ import unittest
 import torch
 from drivingschool.env import DrivingEnv, OBS_SIZE, TRAIN_TRACKS, HOLDOUT_TRACKS, road, observe
 from drivingschool.policy import Policy
-from drivingschool.train import gae, evaluate, ppo_loss
+from drivingschool.train import gae, evaluate, ppo_loss, Trainer
+from drivingschool.live import Bridge
+from pathlib import Path
+import tempfile
 
 
 class DrivingTests(unittest.TestCase):
@@ -73,6 +76,32 @@ class DrivingTests(unittest.TestCase):
         first=evaluate(policy,"cpu",n=8,seed=7)
         second=evaluate(policy,"cpu",n=8,seed=7)
         self.assertEqual(first,second)
+
+    def test_frozen_validation_checkpoint_keeps_tested_update(self):
+        with tempfile.TemporaryDirectory() as folder:
+            trainer=Trainer.__new__(Trainer)
+            trainer.run_dir=Path(folder)
+            trainer.bridge=Bridge()
+            trainer.obstacles_enabled=False
+            trainer.best_success=-1
+            trainer.stage_bests={False:-1,True:-1}
+            trainer.update=99
+            policy=Policy(32)
+            snapshot={"state_dict":policy.state_dict(),"width":32,"update":7,
+                "steps":1234,"obstacles":False,"seed":42}
+            trainer.accept_evaluation({"lap_success_pct":80},snapshot)
+            saved=torch.load(Path(folder)/"best-road.pt",weights_only=True)
+            self.assertEqual(saved["update"],7)
+            self.assertEqual(saved["evaluation"]["policy_update"],7)
+            self.assertTrue(torch.equal(saved["state_dict"]["actor.weight"],policy.actor.weight))
+
+    def test_inference_copy_loads_every_parameter_without_initializing(self):
+        original=Policy(32)
+        copy=Policy(32,device="meta",initialize=False).to_empty(device="cpu")
+        copy.load_state_dict(original.state_dict())
+        obs=DrivingEnv(8).observation
+        with torch.no_grad():
+            self.assertTrue(torch.equal(original(obs)[0],copy(obs)[0]))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,15 @@
+{
+  "samples": 60,
+  "minimum_utilization_pct": 100.0,
+  "mean_utilization_pct": 100.0,
+  "samples_at_100_pct": 60,
+  "mean_watts": 1036.8975,
+  "peak_watts": 1055.42,
+  "peak_temperature_c": 62.0,
+  "mean_viewer_frame_age_seconds": 0.09443715016047159,
+  "population": 262144,
+  "width": 2048,
+  "first_update": 38,
+  "last_update": 58,
+  "notes": "Whole-GB300 readings; includes the existing Robotron process. Viewer/validation run on isolated RTX processes."
+}

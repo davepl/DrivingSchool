@@ -5,13 +5,15 @@ from .env import OBS_SIZE
 
 
 class Policy(nn.Module):
-    def __init__(self, width=256):
+    def __init__(self, width=256, device=None, initialize=True):
         super().__init__()
         self.width = width
-        self.body = nn.Sequential(nn.Linear(OBS_SIZE, width), nn.Tanh(), nn.Linear(width, width), nn.Tanh())
-        self.actor = nn.Linear(width, 2)
-        self.critic = nn.Linear(width, 1)
-        self.logstd = nn.Parameter(torch.tensor([-0.5, -0.5]))
+        self.body = nn.Sequential(nn.Linear(OBS_SIZE, width, device=device), nn.Tanh(), nn.Linear(width, width, device=device), nn.Tanh())
+        self.actor = nn.Linear(width, 2, device=device)
+        self.critic = nn.Linear(width, 1, device=device)
+        self.logstd = nn.Parameter(torch.tensor([-0.5, -0.5], device=device))
+        if not initialize:
+            return
         for layer in self.modules():
             if isinstance(layer, nn.Linear):
                 nn.init.orthogonal_(layer.weight, math.sqrt(2))

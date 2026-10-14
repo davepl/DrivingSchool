@@ -1,4 +1,5 @@
-"""CPU spectator replay and local HTTP UI. Training remains on the GPU."""
+"""Human-speed spectator replay and local HTTP UI; training stays on the GPU."""
+from contextlib import nullcontext
 import json
 import threading
 import time
@@ -53,7 +54,11 @@ class Bridge:
                     "checkpoints": [{k:v for k,v in c.items() if k != "path"} for c in self.checkpoints.values()]}
 
 
-def spectator(bridge, stop, count=384):
+def spectator(bridge, stop, count=384, device="cpu"):
+    device=torch.device(device)
+    stream=torch.cuda.Stream(device=device,priority=-1) if device.type=="cuda" else None
+    def work_stream():
+        return torch.cuda.stream(stream) if stream else nullcontext()
     policy, previous_view, previous_run = None, None, None
     event_seq = 0
     last_weights = None
@@ -98,19 +103,25 @@ def spectator(bridge, stop, count=384):
                 weights = latest
                 metadata = {"width": width, "obstacles": obstacles, "update": 0}
         if weights_key != last_weights:
-            if policy is None or policy.width != metadata["width"]:
-                policy = Policy(metadata["width"])
-            policy.load_state_dict(weights)
+            with work_stream():
+                if policy is None or policy.width != metadata["width"]:
+                    # Checkpoints replace every tensor; avoid expensive orthogonal
+                    # initialization for the large-policy spectator copy.
+                    policy=Policy(metadata["width"],device="meta",initialize=False).to_empty(device=device)
+                policy.load_state_dict(weights)
             policy.eval()
             env.set_obstacles(metadata.get("obstacles", False))
             last_weights = weights_key
         events = []
         with torch.inference_mode():
             for _ in range(view["speed"]):
-                if view["stochastic"] or view["driver"] == "rookie":
-                    actions = policy.sample(env.observation)[0]
-                else:
-                    actions = policy(env.observation)[0]
+                with work_stream(), torch.autocast(device_type=device.type,dtype=torch.bfloat16,enabled=device.type=="cuda"):
+                    observation=env.observation.to(device)
+                    if view["stochastic"] or view["driver"] == "rookie":
+                        actions=policy.sample(observation)[0]
+                    else:
+                        actions=policy(observation)[0]
+                    actions=actions.float().cpu()
                 _, _, done, info, terminal = env.step(actions)
                 crashed = torch.nonzero(info[:, 0]).flatten()
                 for i in crashed[:64].tolist():
@@ -118,10 +129,11 @@ def spectator(bridge, stop, count=384):
                     events.append([event_seq, int(env.track_ids[i]), round(float(terminal[i,0]),2), round(float(terminal[i,1]),2)])
                 total_crashes += int(info[:, 0].sum())
                 total_laps += int(info[:, 1].sum())
-        frame = {"seq": event_seq, "time": time.time(), "cars": env.state[:,:5].tolist(),
+        frame = {"seq": event_seq, "time": time.time(), "run":run,"cars": env.state[:,:5].tolist(),
                  "track_ids": env.track_ids.tolist(), "tracks": HOLDOUT_TRACKS if view["heldout"] else TRAIN_TRACKS,
                  "events": events, "crashes": total_crashes, "laps": total_laps,
-                 "count": count, "policy_update":metadata.get("update",0), "policy_evaluation":metadata.get("evaluation"),
+                 "count": count, "replay_device":str(device), "frame_seconds":time.monotonic()-begin,
+                 "policy_update":metadata.get("update",0), "policy_evaluation":metadata.get("evaluation"),
                  "obstacles": bool(env.obstacle_on[0]), "obstacle_xy": env.obstacles[:len(HOLDOUT_TRACKS if view['heldout'] else TRAIN_TRACKS)].tolist()}
         with bridge.lock:
             bridge.frame = frame
@@ -132,11 +144,11 @@ def hardware_monitor(bridge, stop):
     import subprocess
     while not stop.is_set():
         try:
-            result = subprocess.run(["nvidia-smi", "--query-gpu=name,utilization.gpu,memory.used,power.draw,temperature.gpu", "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=3)
+            result = subprocess.run(["nvidia-smi", "--query-gpu=name,utilization.gpu,memory.used,power.draw,temperature.gpu,power.limit", "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=3)
             rows = []
             for line in result.stdout.strip().splitlines():
-                name, util, mem, watts, temp = [v.strip() for v in line.split(",")]
-                rows.append({"name": name, "utilization": float(util), "memory_gb": float(mem)/1024, "watts": float(watts), "temperature": float(temp)})
+                name, util, mem, watts, temp, limit = [v.strip() for v in line.split(",")]
+                rows.append({"name": name, "utilization": float(util), "memory_gb": float(mem)/1024, "watts": float(watts), "temperature": float(temp), "power_limit_watts":float(limit)})
             with bridge.lock:
                 bridge.hardware = {"gpus": rows, "updated": time.time()}
         except Exception as error:
@@ -167,6 +179,16 @@ def serve(bridge, web_root, host, port):
                 return self.send_json(bridge.snapshot())
             if path == "/api/health":
                 return self.send_json({"ok": True, "status": bridge.metrics.get("status")})
+            if path == "/api/replay-config":
+                if self.client_address[0] not in ("127.0.0.1","::1"):
+                    return self.send_error(403)
+                with bridge.lock:
+                    view=dict(bridge.view)
+                    run=bridge.metrics.get("run","")
+                    key=run+"/latest" if view["driver"]=="latest" else run+"/rookie" if view["driver"]=="rookie" else view["driver"]
+                    checkpoint=bridge.checkpoints.get(key) or bridge.checkpoints.get(run+"/rookie")
+                    config={"view":view,"metrics":dict(bridge.metrics),"checkpoint":checkpoint}
+                return self.send_json(config)
             files = {"/": "index.html", "/index.html": "index.html", "/app.js": "app.js", "/style.css": "style.css"}
             filename = files.get(path)
             if not filename:
@@ -187,13 +209,22 @@ def serve(bridge, web_root, host, port):
             origin = self.headers.get("Origin")
             if origin and urlparse(origin).netloc != self.headers.get("Host"):
                 return self.send_json({"error":"Cross-origin controls are disabled"},403)
-            if urlparse(self.path).path != "/api/control":
+            path=urlparse(self.path).path
+            if path not in ("/api/control","/api/replay-frame"):
                 return self.send_error(404)
             try:
                 length = int(self.headers.get("Content-Length", 0))
-                if length > 4096:
+                if length > (256*1024 if path=="/api/replay-frame" else 4096):
                     raise ValueError("Request too large")
                 request = json.loads(self.rfile.read(length))
+                if path=="/api/replay-frame":
+                    frame=request["frame"]
+                    if len(frame.get("cars",[]))>4096:
+                        raise ValueError("Replay sample too large")
+                    with bridge.lock:
+                        if request["run"]==bridge.metrics.get("run"):
+                            bridge.frame=frame
+                    return self.send_json({"ok":True})
                 command = request["command"]
                 with bridge.lock:
                     if command == "pause":

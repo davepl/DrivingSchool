@@ -3,6 +3,7 @@ import json
 import time
 from pathlib import Path
 import torch
+from concurrent.futures import ThreadPoolExecutor
 from .env import DrivingEnv, OBS_SIZE, DT, fresh_state, observe
 from .policy import Policy
 
@@ -62,8 +63,12 @@ class Trainer:
         self.run_dir = Path(run_dir)
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self.device = args.device
+        self.publish_every = getattr(args,"publish_every",1)
+        self.eval_device = getattr(args,"eval_device",None)
+        self.eval_pool = ThreadPoolExecutor(max_workers=1,thread_name_prefix="validation") if self.eval_device else None
+        self.pending_eval = None
         torch.manual_seed(args.seed)
-        self.policy = Policy(args.width).to(self.device)
+        self.policy = Policy(args.width,device=self.device)
         self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=3e-4, eps=1e-5, fused=str(self.device).startswith("cuda"))
         self.env = DrivingEnv(args.envs, self.device, compiled=not args.eager)
         self.sample = torch.compile(self.policy.sample, fullgraph=True) if not args.eager else self.policy.sample
@@ -83,20 +88,69 @@ class Trainer:
         self.bridge.update_metrics(status="Warming up GPU kernels", baseline=self.baseline,
             evaluation=self.last_eval, run=self.run_dir.name, envs=args.envs,
             device=torch.cuda.get_device_name(self.device) if str(self.device).startswith("cuda") else "CPU",
-            seed=args.seed, steps=0, update=0, obstacles=False, width=args.width)
+            seed=args.seed, steps=0, update=0, obstacles=False, width=args.width,
+            max_load=getattr(args,"max_load",False), continuous=args.updates==0,
+            policy_parameters=sum(p.numel() for p in self.policy.parameters()))
 
-    def save(self, label, evaluation=None):
-        filename = self.run_dir / (label + ".pt")
-        payload = {"state_dict": {k:v.detach().cpu() for k,v in self.policy.state_dict().items()},
+    def policy_snapshot(self):
+        return {"state_dict": {k:v.detach().cpu().clone() for k,v in self.policy.state_dict().items()},
                    "width": self.args.width, "update": self.update, "steps": self.steps,
-                   "obstacles": self.obstacles_enabled, "evaluation": evaluation,
+                   "obstacles": self.obstacles_enabled,
                    "seed": self.args.seed}
+
+    def save(self, label, evaluation=None, snapshot=None):
+        filename = self.run_dir / (label + ".pt")
+        payload = dict(snapshot if snapshot is not None else self.policy_snapshot())
+        payload["evaluation"] = evaluation
         tmp = filename.with_suffix(".tmp")
         torch.save(payload, tmp)
         tmp.replace(filename)
         summary = {k:v for k,v in payload.items() if k != "state_dict"}
         filename.with_suffix(".json").write_text(json.dumps(summary, indent=2))
         self.bridge.register_checkpoint(filename, summary)
+
+    def accept_evaluation(self, result, snapshot):
+        # Save precisely the frozen policy that was tested, even when training
+        # has moved on by the time the asynchronous test finishes.
+        result=dict(result,policy_update=snapshot["update"])
+        self.last_eval=result
+        self.bridge.record_evaluation(snapshot["update"],result)
+        self.save(f"lesson-{snapshot['update']:04d}",result,snapshot)
+        stage=snapshot["obstacles"]
+        if stage==self.obstacles_enabled and result["lap_success_pct"]>self.best_success:
+            self.best_success=result["lap_success_pct"]
+            self.save("best",result,snapshot)
+        if result["lap_success_pct"]>self.stage_bests[stage]:
+            self.stage_bests[stage]=result["lap_success_pct"]
+            self.save("best-barriers" if stage else "best-road",result,snapshot)
+
+    def evaluate_snapshot(self,snapshot):
+        begin=time.monotonic()
+        device=self.eval_device or self.device
+        if str(device).startswith("external:"):
+            import subprocess, tempfile, sys, os
+            with tempfile.TemporaryDirectory(prefix="validation-",dir=self.run_dir) as folder:
+                checkpoint=Path(folder)/"policy.pt"
+                torch.save(snapshot,checkpoint)
+                environment=dict(os.environ,CUDA_VISIBLE_DEVICES=device.split(":",1)[1])
+                completed=subprocess.run([sys.executable,"-m","drivingschool.worker","evaluate","--checkpoint",str(checkpoint)],
+                    env=environment,capture_output=True,text=True,timeout=120,check=True)
+                return json.loads(completed.stdout),time.monotonic()-begin
+        if str(device).startswith("cuda"):
+            torch.cuda.set_device(device)
+        policy=Policy(snapshot["width"],device="meta",initialize=False).to_empty(device=device)
+        policy.load_state_dict(snapshot["state_dict"])
+        result=evaluate(policy,device,snapshot["obstacles"])
+        return result,time.monotonic()-begin
+
+    def poll_evaluation(self,wait=False):
+        if self.pending_eval and (wait or self.pending_eval[0].done()):
+            future,snapshot=self.pending_eval
+            result,seconds=future.result()
+            self.accept_evaluation(result,snapshot)
+            self.pending_eval=None
+            return seconds
+        return 0
 
     def run(self):
         n, horizon = self.args.envs, self.args.horizon
@@ -109,6 +163,7 @@ class Trainer:
         done_buf = torch.empty(shape, dtype=torch.bool, device=self.device)
         metrics_file = self.run_dir / "metrics.jsonl"
         while not self.stop.is_set() and (not self.args.updates or self.update < self.args.updates):
+            self.poll_evaluation()
             if self.bridge.paused:
                 self.bridge.update_metrics(status="Training paused — live driving continues")
                 self.stop.wait(.2)
@@ -152,28 +207,29 @@ class Trainer:
             self.laps += int(numbers[1])
             self.metres += numbers[3]
             self.sim_seconds += horizon*n*DT
-            self.bridge.set_policy(self.policy, self.args.width)
+            if self.update % self.publish_every == 0 or self.update==1:
+                self.bridge.set_policy(self.policy, self.args.width)
             evaluation_seconds = 0
             if self.update % self.args.eval_every == 0 or self.update == 1:
-                self.bridge.update_metrics(status="Testing on two unseen tracks")
-                ev_start = time.monotonic()
-                self.last_eval = evaluate(self.policy, self.device, self.obstacles_enabled)
-                self.bridge.record_evaluation(self.update, self.last_eval)
-                evaluation_seconds = time.monotonic() - ev_start
-                self.save(f"lesson-{self.update:04d}", self.last_eval)
-                if self.last_eval["lap_success_pct"] > self.best_success:
-                    self.best_success = self.last_eval["lap_success_pct"]
-                    self.save("best", self.last_eval)
-                if self.last_eval["lap_success_pct"] > self.stage_bests[self.obstacles_enabled]:
-                    self.stage_bests[self.obstacles_enabled] = self.last_eval["lap_success_pct"]
-                    self.save("best-barriers" if self.obstacles_enabled else "best-road", self.last_eval)
-            self.save("latest", self.last_eval)
+                snapshot=self.policy_snapshot()
+                if self.eval_pool:
+                    if self.pending_eval is None:
+                        self.pending_eval=(self.eval_pool.submit(self.evaluate_snapshot,snapshot),snapshot)
+                else:
+                    self.bridge.update_metrics(status="Testing on two unseen tracks")
+                    ev_start=time.monotonic()
+                    result=evaluate(self.policy,self.device,self.obstacles_enabled)
+                    evaluation_seconds=time.monotonic()-ev_start
+                    self.accept_evaluation(result,snapshot)
+            if self.update % self.publish_every == 0 or self.update==1:
+                self.save("latest", self.last_eval)
             metrics = dict(status="Learning with PPO", run=self.run_dir.name, envs=n, steps=self.steps,
                 update=self.update, crashes=self.crashes, laps=self.laps, miles=self.metres/1609.344,
                 simulated_hours=self.sim_seconds/3600, steps_per_second=horizon*n/duration,
                 update_seconds=duration, evaluation_seconds=evaluation_seconds,
                 loss=torch.stack(losses).mean().item(), wall_seconds=time.monotonic()-self.started,
                 overall_steps_per_second=self.steps/(time.monotonic()-self.started),
+                max_load=getattr(self.args,"max_load",False), continuous=self.args.updates==0,
                 evaluation=self.last_eval, baseline=self.baseline, obstacles=self.obstacles_enabled,
                 gpu_memory_gb=torch.cuda.max_memory_allocated(self.device)/1e9 if str(self.device).startswith("cuda") else 0,
                 actual_population_sample=self.env.state[:32,:5].cpu().tolist())
@@ -190,6 +246,9 @@ class Trainer:
                 self.best_success = -1
                 self.bridge.update_metrics(obstacles=True, status="New lesson: avoid barriers")
         self.save("latest", self.last_eval)
+        self.poll_evaluation(wait=True)
+        if self.eval_pool:
+            self.eval_pool.shutdown(wait=True)
         self.bridge.update_metrics(status="Class complete — best driver is on track", complete=True)
         best_key = self.run_dir.name + ("/best-barriers" if self.obstacles_enabled else "/best-road")
         with self.bridge.lock:
