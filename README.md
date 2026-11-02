@@ -5,9 +5,9 @@ The GPU runs both 2D vehicle simulation and PPO reinforcement learning. A local
 browser dashboard replays 384 drivers at human speed and shows real training
 throughput, crashes, miles, and held-out lap completion.
 
-The installed service now uses **max-load mode**: a 2,048-wide, 4.24-million-
+On the original Dell GB300, **max-load mode** used a 2,048-wide, 4.24-million-
 parameter policy, 32-step rollouts, 131,072-sample minibatches, three PPO epochs,
-and continuous training. A one-minute measurement recorded **100% GB300
+and continuous training. New service installations use the smaller default profile. A one-minute measurement recorded **100% GB300
 utilization in all 60 samples**, **1,037 W average power**, and a peak of 1,055 W.
 The live viewer's average frame age was 94 ms. Those are measured whole-GPU
 readings with Robotron still running, not a claim about advertised peak FLOPS.
