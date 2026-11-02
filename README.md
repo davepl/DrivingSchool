@@ -28,8 +28,8 @@ If your desktop does not show icons, open that folder in Files or use the URL.
 GNOME may require right-clicking the launcher and choosing **Allow Launching**.
 The Dell's existing GNOME RDP service listens on port 3389.
 
-The service is already installed for `dave` and starts automatically. It trains
-continuously. **New class** starts another run with fresh weights and preserves
+Service installation leaves autostart disabled and does not launch the program.
+Start the service explicitly when ready. **New class** starts another run with fresh weights and preserves
 the previous class. **Pause learning** pauses at an update
 boundary while the live replay continues.
 
@@ -51,8 +51,9 @@ For a manually configured run, first stop the service, then:
 `--max-load` selects the larger continuous profile. Explicit arguments override
 its preset values. `--updates 0` trains continuously. `--envs` changes the real GPU population.
 `--eager` disables compilation for debugging; `--device cpu` supports a small CPU
-run. The scripts choose physical GPU 1, the GB300 on this Dell. CUDA sees the
-selected device as `cuda:0`. Max-load mode runs replay inference and asynchronous
+run. The scripts default to GPU 0, honoring `CUDA_VISIBLE_DEVICES` or an explicit
+`DRIVING_GPU` override. On the original Dell, use `DRIVING_GPU=1` to select the
+GB300. CUDA sees the selected device as `cuda:0`. Max-load mode runs replay inference and asynchronous
 validation in separate processes exposing physical GPU 0, the RTX PRO 2000.
 This separation avoids the Dell's CUDA initialization failure when both GPU
 types are exposed in one process. `--viewer-device` and `--eval-device` accept
@@ -64,8 +65,10 @@ It uses 65,536 cars, a 512-wide policy, and 300 updates, then selects its best
 driver. The smaller profile is useful for quick learning demonstrations;
 the max-load profile is intended to occupy the GB300 continuously.
 
-On another computer, set `DRIVING_UV` and `DRIVING_PYTHON` as needed, then run
-`scripts/setup.sh`. Setup uses NVIDIA's official CUDA 13.0 PyTorch wheel index.
+On another computer, set `DRIVING_PYTHON` as needed, then run
+`scripts/setup.sh`. It creates `.venv` and installs dependencies without starting
+anything. Set `DRIVING_TORCH_INDEX` if a specific official PyTorch wheel index is
+needed for the target driver or a CPU installation.
 The checked-in `requirements.lock.txt` records the Dell's exact runtime packages.
 On this Dell the isolated `.venv` uses CPython 3.14.8, PyTorch 2.13.0+cu130, and
 NumPy 2.5.2. It does not alter the existing Robotron runtime.

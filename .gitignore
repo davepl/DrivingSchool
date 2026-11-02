@@ -4,3 +4,4 @@ __pycache__/
 runs/
 .pytest_cache/
 *.log
+requirements-local.lock.txt

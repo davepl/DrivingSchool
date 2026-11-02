@@ -10,7 +10,7 @@ After=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=$repo
-ExecStart=$repo/scripts/run.sh --max-load
+ExecStart=$repo/scripts/run.sh
 Restart=on-failure
 RestartSec=10
 TimeoutStopSec=30
@@ -22,7 +22,7 @@ cat > "$HOME/Desktop/Driving School.desktop" <<EOF
 Version=1.0
 Type=Application
 Name=Dave's Driving School
-Comment=Watch a quarter-million cars learn to drive on the GB300
+Comment=Watch simulated cars learn to drive
 Exec=$repo/scripts/watch.sh
 Icon=applications-games
 Terminal=false
@@ -34,5 +34,5 @@ fi
 chmod +x "$HOME/Desktop/Driving School.desktop"
 gio set "$HOME/Desktop/Driving School.desktop" metadata::trusted true 2>/dev/null || true
 systemctl --user daemon-reload
-systemctl --user enable --now driving-school.service
-printf 'Driving school is available at http://127.0.0.1:8780/\n'
+systemctl --user disable driving-school.service
+printf 'Service installed with autostart disabled; nothing started.\nStart manually: systemctl --user start driving-school.service\n'
